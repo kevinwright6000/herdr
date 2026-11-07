@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, getToken } from './api';
+import { api } from './api';
+import { supabase } from './supabase';
 import Board from './Board';
 import ListView from './ListView';
 import TaskDrawer from './TaskDrawer';
@@ -43,14 +44,23 @@ export default function ProjectView({
   // Initial load + live updates from teammates.
   useEffect(() => {
     void reload();
-    const es = new EventSource(`/api/projects/${projectId}/events?token=${getToken()}`);
     let timer: number | undefined;
-    es.onmessage = () => {
+    const ping = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => void reload(), 150);
     };
+    const scoped = (table: string) => ({ event: '*' as const, schema: 'public', table, filter: `project_id=eq.${projectId}` });
+    const channel = supabase
+      .channel(`project:${projectId}`)
+      .on('postgres_changes', scoped('tasks'), ping)
+      .on('postgres_changes', scoped('board_columns'), ping)
+      .on('postgres_changes', scoped('labels'), ping)
+      // Row-level security limits these two to projects you can see.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_labels' }, ping)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, ping)
+      .subscribe();
     return () => {
-      es.close();
+      void supabase.removeChannel(channel);
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

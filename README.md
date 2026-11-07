@@ -2,76 +2,64 @@
 
 Project management that herds the cats for you. A fast kanban board with a list view, comments, labels, filters and live updates, built to be adopted in an afternoon.
 
+**Stack:** React + TypeScript + Vite on Vercel, Supabase (Postgres, Auth, Realtime) for everything else. There is no custom server.
+
 ## Features
 
-- **Kanban board**: drag and drop tasks between and within columns (mouse, touch or keyboard), quick-add, add/rename/delete columns, mark columns as "done" to drive progress
-- **List view**: sortable table with inline status changes
-- **Tasks**: assignee, priority, due date (overdue highlighting), estimate, labels, description, comments, activity history
-- **Search and filters**: by text, assignee, label, priority
-- **Live updates**: teammates' changes appear instantly (Server-Sent Events)
-- **Workspaces and teams**: signup creates a workspace; add teammates by email
-- **Auth**: email + password (scrypt-hashed), session tokens
+- **Kanban board:** drag and drop (mouse, touch or keyboard), quick-add, add/rename/delete columns, mark columns as "done" to drive progress
+- **List view:** sortable table with inline status changes
+- **Tasks:** assignee, priority, due date (overdue highlighting), estimate, labels, description, comments, activity history
+- **Search and filters:** by text, assignee, label, priority
+- **Live updates:** teammates' changes appear instantly (Supabase Realtime)
+- **Workspaces and teams:** signup creates a workspace; admins add teammates by email
+- **Security in the database:** row-level security means people only ever see their own workspaces' data
 - Light and dark themes, responsive layout
 
-## Quick start
+## Setup
 
-Requires Node.js 22.5 or newer (uses the built-in `node:sqlite`).
+### 1. Database (once)
+
+Create a Supabase project, then run the files in `supabase/migrations/` in order in the SQL editor (or with the Supabase CLI: `supabase db push`):
+
+1. `20261107000001_schema.sql`: tables, triggers, functions
+2. `20261107000002_security.sql`: row-level security, grants, realtime
+3. `20261107000003_private_helpers.sql`: moves internal helpers out of the public API
+
+In the Supabase dashboard under **Authentication → URL Configuration**, set **Site URL** to your deployed URL (for example `https://herdr.vercel.app`) and add `http://localhost:5173` to the redirect URLs. Email confirmation is on by default, so people confirm their address before their first login.
+
+### 2. Web app
 
 ```bash
+cp web/.env.example web/.env.local   # fill in your Supabase URL and anon/publishable key
 npm install
-npm run dev        # API on :4000, web app on http://localhost:5173
+npm run dev                          # http://localhost:5173
 ```
 
-Production:
+Both values are public by design (find them in **Project Settings → API**). Never use the `service_role` key in this app.
 
-```bash
-npm run build      # builds web/dist
-npm start          # API + built app on http://localhost:4000
-```
+### 3. Deploy to Vercel
 
-Or with Docker:
-
-```bash
-docker build -t herdr .
-docker run -p 4000:4000 -v herdr-data:/data herdr
-```
-
-| Variable    | Default    | Purpose                  |
-| ----------- | ---------- | ------------------------ |
-| `PORT`      | `4000`     | HTTP port                |
-| `HERDR_DB`  | `herdr.db` | SQLite database file     |
+Import the repo and add the same two variables, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, under **Settings → Environment Variables**. `vercel.json` already sets the build command and output directory.
 
 ## Project layout
 
 ```
-server/   Express 5 + SQLite REST API, SSE live updates, tests
-web/      React + TypeScript + Vite single-page app (dnd-kit for drag and drop)
+web/                 React app (Vite, dnd-kit for drag and drop)
+  src/api.ts         All Supabase calls
+supabase/
+  migrations/        Schema, security, helpers
+  tests/permissions.sql   Simulates three users against the real policies, rolls back
 ```
 
-```bash
-npm test           # API tests (node:test)
-npm run typecheck  # server + web
-```
+`npm run typecheck` and `npm run build` check the app.
 
-## API sketch
+## How the data is protected
 
-All routes except signup/login need `Authorization: Bearer <token>`.
-
-| Method | Route | Purpose |
-| --- | --- | --- |
-| POST | `/api/auth/signup`, `/api/auth/login` | Create account / sign in |
-| GET | `/api/me` | Current user and workspaces |
-| GET/POST | `/api/workspaces/:id/projects` | List / create projects |
-| GET/POST | `/api/workspaces/:id/members` | List / add teammates |
-| GET | `/api/projects/:id` | Whole board: columns, tasks, labels, members |
-| POST | `/api/projects/:id/tasks` | Create task |
-| PATCH | `/api/tasks/:id` | Update fields and labels |
-| POST | `/api/tasks/:id/move` | `{ columnId, index }` reorder or change column |
-| POST | `/api/tasks/:id/comments` | Add comment |
-| GET | `/api/projects/:id/events` | SSE stream of change notifications |
-
-Task ordering uses fractional positions, so a drag updates a single row.
+- Every table has row-level security. Access flows from workspace membership.
+- Browser clients can only change what the policies and column grants allow. Task numbers, authorship and ownership are set by triggers, not by the client.
+- Creating projects, adding teammates and reordering tasks go through small database functions (`create_project`, `add_member`, `move_task`) that check permissions themselves.
+- `supabase/tests/permissions.sql` verifies this: outsiders see nothing, members cannot invite or delete projects, signed-out requests are blocked.
 
 ## Roadmap
 
-Timeline and workload views, dependencies, custom fields, automations, templates, docs/wiki, email invites and notifications, SSO, API tokens and webhooks. See the product spec for the full plan.
+Timeline and workload views, dependencies, custom fields, automations, templates, docs/wiki, email invites and notifications, SSO, API tokens and webhooks.

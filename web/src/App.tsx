@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, getToken, setToken } from './api';
+import { api } from './api';
 import AuthPage from './AuthPage';
 import ProjectView from './ProjectView';
+import { configured, supabase } from './supabase';
 import type { Member, ProjectSummary, User, Workspace } from './types';
 import { Avatar, Logo, Modal } from './ui';
 
@@ -11,7 +12,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [booting, setBooting] = useState(!!getToken());
+  const [booting, setBooting] = useState(configured);
   const [projectId, setProjectId] = useState<string | null>(routeId());
   const [newName, setNewName] = useState<string | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
@@ -22,24 +23,27 @@ export default function App() {
       setUser(me.user);
       setWorkspace(me.workspaces[0] ?? null);
     } catch {
-      setToken(null);
+      await supabase.auth.signOut();
     } finally {
       setBooting(false);
     }
   }, []);
 
   useEffect(() => {
-    if (getToken()) void loadMe();
+    if (!configured) return;
+    void supabase.auth.getSession().then(({ data }) => (data.session ? loadMe() : setBooting(false)));
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setWorkspace(null);
+        setProjects([]);
+      }
+    });
     const onHash = () => setProjectId(routeId());
-    const onUnauth = () => {
-      setToken(null);
-      setUser(null);
-    };
     window.addEventListener('hashchange', onHash);
-    window.addEventListener('herdr:unauth', onUnauth);
     return () => {
+      sub.subscription.unsubscribe();
       window.removeEventListener('hashchange', onHash);
-      window.removeEventListener('herdr:unauth', onUnauth);
     };
   }, [loadMe]);
 
@@ -67,24 +71,28 @@ export default function App() {
   }
 
   async function logout() {
-    await api.logout().catch(() => undefined);
-    setToken(null);
-    setUser(null);
-    setProjects([]);
+    await api.logout();
     window.location.hash = '';
   }
 
-  if (booting) return <div className="splash"><Logo size={48} /></div>;
-  if (!user || !workspace) {
+  if (!configured) {
     return (
-      <AuthPage
-        onAuthed={(u) => {
-          setUser(u);
-          void loadMe();
-        }}
-      />
+      <div className="auth">
+        <div className="auth-card">
+          <div className="auth-logo">
+            <Logo size={40} />
+            <h1>Almost there</h1>
+          </div>
+          <p>
+            Herdr needs two settings: <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>. Add them in your
+            hosting provider's environment variables (or <code>web/.env.local</code> locally), then redeploy.
+          </p>
+        </div>
+      </div>
     );
   }
+  if (booting) return <div className="splash"><Logo size={48} /></div>;
+  if (!user || !workspace) return <AuthPage onAuthed={() => void loadMe()} />;
 
   return (
     <div className="shell">

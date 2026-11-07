@@ -1,29 +1,62 @@
 import { useState } from 'react';
-import { api, setToken } from './api';
-import type { User } from './types';
+import { api } from './api';
 import { Logo } from './ui';
 
-export default function AuthPage({ onAuthed }: { onAuthed: (user: User) => void }) {
+export default function AuthPage({ onAuthed }: { onAuthed: () => void }) {
   const [mode, setMode] = useState<'login' | 'signup'>('signup');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const res = mode === 'signup' ? await api.signup(name, email, password) : await api.login(email, password);
-      setToken(res.token);
-      onAuthed(res.user);
+      if (mode === 'signup') {
+        const { needsConfirmation } = await api.signup(name, email, password);
+        if (needsConfirmation) {
+          setConfirmEmail(true);
+          return;
+        }
+      } else {
+        await api.login(email, password);
+      }
+      onAuthed();
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+
+  if (confirmEmail) {
+    return (
+      <div className="auth">
+        <div className="auth-card">
+          <div className="auth-logo">
+            <Logo size={40} />
+            <h1>Check your email</h1>
+          </div>
+          <p>
+            We sent a confirmation link to <strong>{email}</strong>. Open it, then come back and log in.
+          </p>
+          <button
+            className="btn primary"
+            onClick={() => {
+              setConfirmEmail(false);
+              setMode('login');
+              setPassword('');
+            }}
+          >
+            Go to log in
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
